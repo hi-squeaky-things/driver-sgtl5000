@@ -28,4 +28,6 @@ In the example folder you find two ESP32 examples:
 
 ## Credits
 
-Inspiration is taken from the teensy implementation of the SGTL5000 driver.
+- Inspiration is taken from the teensy implementation of the SGTL5000 driver.
+- [Small Braille ASCII Font](https://patorjk.com/software/taag/#p=display&f=Small+Braille&t=LITTLE+WEIRDO&x=rainbow1&v=1&h=1&w=80&we=false)
+
