@@ -315,9 +315,9 @@ impl<I2C: I2c> SGTL5000<I2C> {
 
     // 0, 10, 20, 30 DB (0, 10, 100, 1000 x amplification)
     pub fn set_microphone_gain(&mut self, db: u8) -> Result<bool, I2C::Error> {
-        let mut set_db_level = 0x0;
+        let mut _set_db_level = 0x0;
         if db <= 30 {
-            set_db_level = db / 10;
+            _set_db_level = db / 10;
         }
 
         //fixed bias resistor = 2KOhm, ,biasvolt = 3v, variable pre-gain.
@@ -331,7 +331,6 @@ impl<I2C: I2c> SGTL5000<I2C> {
         // DAP --> IS2_DOUT,
 
         self.update_configuration(CHIP_SSS_CTRL, 0b00_00_00_00, 0b01_11_00_00)?;
-
         self.update_configuration(DAP_CONTROL, 0x00, 0b00_0_0_000_1)?;
 
         //        self.update_configuration(DAP_AVC_CTRL, 0b00_01_00_01, 0b00_0_0000_1)?;

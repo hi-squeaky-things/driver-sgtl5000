@@ -124,7 +124,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "driver-sgtl5000"
+name = "driver_sgtl5000"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 1.0.0",

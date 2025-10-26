@@ -1,12 +1,16 @@
 [package]
-name = "driver-sgtl5000"
+name = "driver_sgtl5000"
 version = "0.1.0"
 edition = "2021"
-
+authors = ["Daniël <daniel@hi-squeaky-things.nl>"]
+description = "A Rust #no-std optimized wave table synthesizer for embedded devices."
+license = "MIT"
+repository = "https://github.com/hi-squeaky-things/driver-sgtl5000"
+keywords = ["no-std", "i2s", "driver", "sgtl5000"]
+categories = ["embedded"]
 
 [dependencies]
 embedded-hal = { version = "1.0.0" }
-
 
 [dev-dependencies]
 esp-backtrace = { version = "0.15.0", features = [
@@ -16,7 +20,7 @@ esp-backtrace = { version = "0.15.0", features = [
     "println",
 ] }
 esp-hal = { version = "0.23.1", features = ["esp32s3", "octal-psram"] }
-esp-println = { version = "0.16.0", features = ["esp32s3", "log"] }
+esp-println = { version = "0.13.0", features = ["esp32s3", "log"] }
 
 [profile.dev]
 opt-level = 1
