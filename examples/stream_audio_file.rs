@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-use biquad::ToHertz;
 use driver_sgtl5000::SGTL5000;
 use esp_backtrace as _;
 use esp_hal::{

@@ -5,7 +5,6 @@ edition = "2021"
 
 
 [dependencies]
-biquad = "0.5.0"
 embedded-hal = { version = "1.0.0" }
 
 
@@ -17,7 +16,7 @@ esp-backtrace = { version = "0.15.0", features = [
     "println",
 ] }
 esp-hal = { version = "0.23.1", features = ["esp32s3", "octal-psram"] }
-esp-println = { version = "0.13.0", features = ["esp32s3", "log"] }
+esp-println = { version = "0.16.0", features = ["esp32s3", "log"] }
 
 [profile.dev]
 opt-level = 1

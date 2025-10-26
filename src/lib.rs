@@ -57,7 +57,7 @@ pub mod registers {
     pub const CHIP_PAD_STRENGTH: u16 = 0x0014;
     pub const CHIP_ANA_ADC_CTRL: u16 = 0x0020;
     pub const CHIP_ANA_HP_CTRL: u16 = 0x0022;
-    
+
     ///
     pub const CHIP_ANA_CTRL: u16 = 0x0024;
     pub const CHIP_ANA_CTRL_ADC_MUTE_BIT: u8 = 0;
@@ -108,15 +108,14 @@ pub mod registers {
     pub const DAP_COEF_WR_A2_LSB: u16 = 0x013A;
 }
 
-
 pub enum AdcInputSources {
     Microphone = 0,
-    LineIn = 1
+    LineIn = 1,
 }
 
 pub enum HeadphoneInputSources {
     DAC = 0,
-    LineIn = 1
+    LineIn = 1,
 }
 
 impl<I2C: I2c> SGTL5000<I2C> {
@@ -168,35 +167,32 @@ impl<I2C: I2c> SGTL5000<I2C> {
 
         //SGTL is I2S Slave, so we can power up: lineout, hp, adc, dac
         self.update_configuration(CHIP_ANA_POWER, 0x6A, 0xFF)?;
-     
-     
-     
-     
+
         Ok(true)
     }
 
     pub fn power_up(&mut self) -> Result<bool, I2C::Error> {
-           // power up all digital stuff
-           self.update_configuration(CHIP_DIG_POWER, 0x00, 0x73)?;
-           self.update_configuration(CHIP_LINE_OUT_VOL, 0x1D, 0x1D)?;
-   
-           // ADC --> IS2_OUT, I2S_IN --> DAC, ADC --> DAP (not enabled), ADC --> DAP MIXER (not enabled)
-           self.update_configuration(CHIP_SSS_CTRL, 0b_00_00_00_00, 0b_00_01_00_00)?;
-   
-           // unmute dac
-           self.update_configuration(CHIP_ADCDAC_CTRL, 0x00, 0x00)?;
-   
-           // digital gain, 0dB
-           self.update_configuration(CHIP_DAC_VOL, 0x3C, 0x3C)?;
-   
-           // headphone volume (lowest level)
-           self.update_configuration(CHIP_ANA_HP_CTRL, 0x7F, 0x7F)?;
-   
-           // enable analog with ZCD
-           self.update_configuration(CHIP_ANA_CTRL, 0b0000_0000, 0b0000_0010)?;
-   
-           self.init_clock_and_i2s()?;
-           Ok(true)
+        // power up all digital stuff
+        self.update_configuration(CHIP_DIG_POWER, 0x00, 0x73)?;
+        self.update_configuration(CHIP_LINE_OUT_VOL, 0x1D, 0x1D)?;
+
+        // ADC --> IS2_OUT, I2S_IN --> DAC, ADC --> DAP (not enabled), ADC --> DAP MIXER (not enabled)
+        self.update_configuration(CHIP_SSS_CTRL, 0b_00_00_00_00, 0b_00_01_00_00)?;
+
+        // unmute dac
+        self.update_configuration(CHIP_ADCDAC_CTRL, 0x00, 0x00)?;
+
+        // digital gain, 0dB
+        self.update_configuration(CHIP_DAC_VOL, 0x3C, 0x3C)?;
+
+        // headphone volume (lowest level)
+        self.update_configuration(CHIP_ANA_HP_CTRL, 0x7F, 0x7F)?;
+
+        // enable analog with ZCD
+        self.update_configuration(CHIP_ANA_CTRL, 0b0000_0000, 0b0000_0010)?;
+
+        self.init_clock_and_i2s()?;
+        Ok(true)
     }
 
     fn init_clock_and_i2s(&mut self) -> Result<bool, I2C::Error> {
@@ -224,13 +220,14 @@ impl<I2C: I2c> SGTL5000<I2C> {
         Ok(true)
     }
 
-    fn modify_configuration_bit(&mut self, register: u16, position: u8, value: bool) -> Result<bool, I2C::Error> {
+    fn modify_configuration_bit(
+        &mut self,
+        register: u16,
+        position: u8,
+        value: bool,
+    ) -> Result<bool, I2C::Error> {
         let mut analog_control_configuration = self.read_configuration(register)?;
-        self.set_configuration_bit(
-            &mut analog_control_configuration,
-            position,
-            value,
-        );
+        self.set_configuration_bit(&mut analog_control_configuration, position, value);
         self.update_configuration(
             register,
             analog_control_configuration[0],
@@ -268,9 +265,9 @@ impl<I2C: I2c> SGTL5000<I2C> {
     /// volume 0 --> 127
     pub fn headphone_volume(&mut self, value: u8) -> Result<bool, I2C::Error> {
         let hp_volume = match value {
-            0x00            => 0x7F,
-            0x80..=u8::MAX  => 0x00,
-            0x01..=0x7F     => 0x80 - value,
+            0x00 => 0x7F,
+            0x80..=u8::MAX => 0x00,
+            0x01..=0x7F => 0x80 - value,
         };
         self.update_configuration(CHIP_ANA_HP_CTRL, hp_volume, hp_volume)?;
         Ok(true)
@@ -296,42 +293,48 @@ impl<I2C: I2c> SGTL5000<I2C> {
         Ok(true)
     }
 
-    pub fn select_adc_input(&mut self, input: AdcInputSources) -> Result<bool, I2C::Error>  {
-        self.modify_configuration_bit(CHIP_ANA_CTRL, CHIP_ANA_CTRL_SELECT_ADC_BIT, (input as u8) == 1)?;
+    pub fn select_adc_input(&mut self, input: AdcInputSources) -> Result<bool, I2C::Error> {
+        self.modify_configuration_bit(
+            CHIP_ANA_CTRL,
+            CHIP_ANA_CTRL_SELECT_ADC_BIT,
+            (input as u8) == 1,
+        )?;
         Ok(true)
     }
-    pub fn select_headphone_input(&mut self, input: HeadphoneInputSources) -> Result<bool, I2C::Error>  {
-        self.modify_configuration_bit(CHIP_ANA_CTRL, CHIP_ANA_CTRL_SELECT_HP_INPUT_BIT, (input as u8) == 1)?;
+    pub fn select_headphone_input(
+        &mut self,
+        input: HeadphoneInputSources,
+    ) -> Result<bool, I2C::Error> {
+        self.modify_configuration_bit(
+            CHIP_ANA_CTRL,
+            CHIP_ANA_CTRL_SELECT_HP_INPUT_BIT,
+            (input as u8) == 1,
+        )?;
         Ok(true)
     }
-
 
     // 0, 10, 20, 30 DB (0, 10, 100, 1000 x amplification)
     pub fn set_microphone_gain(&mut self, db: u8) -> Result<bool, I2C::Error> {
         let mut set_db_level = 0x0;
         if db <= 30 {
             set_db_level = db / 10;
-        }  
+        }
 
-  
         //fixed bias resistor = 2KOhm, ,biasvolt = 3v, variable pre-gain.
         //// mic on board =   self.update_configuration(CHIP_MIC_CTRL,0b00_00_00_11 , 0b00_10_00_10)?;
         //self.update_configuration(CHIP_MIC_CTRL,0b00_00_00_11 , 0b00_10_00_10)?;
-              self.update_configuration(CHIP_MIC_CTRL,0b00_00_00_11 , 0b01_11_00_10)?;
+        self.update_configuration(CHIP_MIC_CTRL, 0b00_00_00_11, 0b01_11_00_10)?;
         Ok(true)
     }
 
     pub fn enable_audio_processing(&mut self) -> Result<bool, I2C::Error> {
-
-        // DAP --> IS2_DOUT, 
+        // DAP --> IS2_DOUT,
 
         self.update_configuration(CHIP_SSS_CTRL, 0b00_00_00_00, 0b01_11_00_00)?;
-     
+
         self.update_configuration(DAP_CONTROL, 0x00, 0b00_0_0_000_1)?;
 
-
-
-//        self.update_configuration(DAP_AVC_CTRL, 0b00_01_00_01, 0b00_0_0000_1)?;
+        //        self.update_configuration(DAP_AVC_CTRL, 0b00_01_00_01, 0b00_0_0000_1)?;
         Ok(true)
     }
 
@@ -346,8 +349,5 @@ impl<I2C: I2c> SGTL5000<I2C> {
         self.update_configuration(CHIP_SSS_CTRL, 0x00, 0x10)?;
 
         Ok(true)
-
     }
-
-
 }
