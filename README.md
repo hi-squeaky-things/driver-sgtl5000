@@ -18,3 +18,14 @@ Featuring:
 
 > [!IMPORTANT]
 > **Hi Squeaky Things** can happen at any time. This driver let the [_Little Weirdo_](https://github.com/hi-squeaky-things/little-weirdo) squeak, squuuueak, squeeeeeaak, squeaaaaaaaaak!
+
+## Examples
+
+In the example folder you find two ESP32 examples:
+
+1. loopback test (listen to input and stream it to the output).
+2. play a wav-file continuously.
+
+## Credits
+
+Inspiration is taken from the teensy implementation of the SGTL5000 driver.
