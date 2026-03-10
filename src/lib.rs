@@ -32,7 +32,6 @@
 //! }
 //! ```
 //!
-use embedded_hal::i2c::I2c;
 use registers::*;
 
 #[derive(Debug, Copy, Clone)]
@@ -118,7 +117,7 @@ pub enum HeadphoneInputSources {
     LineIn = 1,
 }
 
-impl<I2C: I2c> SGTL5000<I2C> {
+impl<I2C: embedded_hal_async::i2c::I2c> SGTL5000<I2C> {
     /// Create new builder with a default I2C address of 0x0A (normal configuration)
     #[allow(clippy::new_ret_no_self)]
     pub fn new(i2c: I2C) -> Self {
@@ -134,75 +133,75 @@ impl<I2C: I2c> SGTL5000<I2C> {
         SGTL5000 { i2c, address }
     }
 
-    pub fn ready(&mut self) -> Result<bool, I2C::Error> {
-        if self.get_chip_id()? == SGTL5000_CHIP_ID {
+    pub async fn ready(&mut self) -> Result<bool, I2C::Error> {
+        if self.get_chip_id().await.unwrap() == SGTL5000_CHIP_ID {
             return Ok(true);
         }
         Ok(false)
     }
 
-    pub fn get_chip_id(&mut self) -> Result<u8, I2C::Error> {
-        let chip_id_and_revision = self.read_configuration(CHIP_ID)?;
+    pub async fn get_chip_id(&mut self) -> Result<u8, I2C::Error> {
+        let chip_id_and_revision = self.read_configuration(CHIP_ID).await?;
         Ok(chip_id_and_revision[0])
     }
 
-    pub fn get_chip_revision(&mut self) -> Result<u8, I2C::Error> {
-        let chip_id_and_revision = self.read_configuration(CHIP_ID)?;
+    pub async fn get_chip_revision(&mut self) -> Result<u8, I2C::Error> {
+        let chip_id_and_revision = self.read_configuration(CHIP_ID).await?;
         Ok(chip_id_and_revision[1])
     }
 
-    pub fn init(&mut self) -> Result<bool, I2C::Error> {
+    pub async fn init(&mut self) -> Result<bool, I2C::Error> {
         // VDDD is externally driven with 1.8V
-        self.update_configuration(CHIP_ANA_POWER, 0x42, 0x60)?;
+        self.update_configuration(CHIP_ANA_POWER, 0x42, 0x60).await?;
         // VDDA & VDDIO both over 3.1V
-        self.update_configuration(CHIP_LINREG_CTRL, 0x00, 0x6C)?;
+        self.update_configuration(CHIP_LINREG_CTRL, 0x00, 0x6C).await?;
         // VAG=1.575, normal ramp, +12.5% bias current
-        self.update_configuration(CHIP_REF_CTRL, 0x01, 0xF2)?;
+        self.update_configuration(CHIP_REF_CTRL, 0x01, 0xF2).await?;
         // LO_VAGCNTRL=1.65V, OUT_CURRENT=0.54mA
-        self.update_configuration(CHIP_LINE_OUT_CTRL, 0x0F, 0x22)?;
+        self.update_configuration(CHIP_LINE_OUT_CTRL, 0x0F, 0x22).await?;
         // allow up to 125mA
-        self.update_configuration(CHIP_SHORT_CTRL, 0x44, 0x46)?;
+        self.update_configuration(CHIP_SHORT_CTRL, 0x44, 0x46).await?;
         // enable zero cross detectors
-        self.update_configuration(CHIP_ANA_CTRL, 0b0000_0001, 0b0011_0011)?;
+        self.update_configuration(CHIP_ANA_CTRL, 0b0000_0001, 0b0011_0011).await?;
 
         //SGTL is I2S Slave, so we can power up: lineout, hp, adc, dac
-        self.update_configuration(CHIP_ANA_POWER, 0x6A, 0xFF)?;
+        self.update_configuration(CHIP_ANA_POWER, 0x6A, 0xFF).await?;
 
         Ok(true)
     }
 
-    pub fn power_up(&mut self) -> Result<bool, I2C::Error> {
+    pub async fn power_up(&mut self) -> Result<bool, I2C::Error> {
         // power up all digital stuff
-        self.update_configuration(CHIP_DIG_POWER, 0x00, 0x73)?;
-        self.update_configuration(CHIP_LINE_OUT_VOL, 0x1D, 0x1D)?;
+        self.update_configuration(CHIP_DIG_POWER, 0x00, 0x73).await?;
+        self.update_configuration(CHIP_LINE_OUT_VOL, 0x1D, 0x1D).await?;
 
         // ADC --> IS2_OUT, I2S_IN --> DAC, ADC --> DAP (not enabled), ADC --> DAP MIXER (not enabled)
-        self.update_configuration(CHIP_SSS_CTRL, 0b_00_00_00_00, 0b_00_01_00_00)?;
+        self.update_configuration(CHIP_SSS_CTRL, 0b_00_00_00_00, 0b_00_01_00_00).await?;
 
         // unmute dac
-        self.update_configuration(CHIP_ADCDAC_CTRL, 0x00, 0x00)?;
+        self.update_configuration(CHIP_ADCDAC_CTRL, 0x00, 0x00).await?;
 
         // digital gain, 0dB
-        self.update_configuration(CHIP_DAC_VOL, 0x3C, 0x3C)?;
+        self.update_configuration(CHIP_DAC_VOL, 0x3C, 0x3C).await?;
 
         // headphone volume (lowest level)
-        self.update_configuration(CHIP_ANA_HP_CTRL, 0x7F, 0x7F)?;
+        self.update_configuration(CHIP_ANA_HP_CTRL, 0x7F, 0x7F).await?;
 
         // enable analog with ZCD
-        self.update_configuration(CHIP_ANA_CTRL, 0b0000_0000, 0b0000_0010)?;
+        self.update_configuration(CHIP_ANA_CTRL, 0b0000_0000, 0b0000_0010).await?;
 
-        self.init_clock_and_i2s()?;
+        self.init_clock_and_i2s().await?;
         Ok(true)
     }
 
-    fn init_clock_and_i2s(&mut self) -> Result<bool, I2C::Error> {
+    async fn init_clock_and_i2s(&mut self) -> Result<bool, I2C::Error> {
         // 44.1 kHz, 256*Fs
-        self.update_configuration(CHIP_CLK_CTRL, 0x00, 0x04)?;
+        self.update_configuration(CHIP_CLK_CTRL, 0x00, 0x04).await?;
         // SCLK=64*Fs, 16bit, I2S format
-        self.update_configuration(CHIP_I2S_CTRL, 0x00, 0x30)?;
+        self.update_configuration(CHIP_I2S_CTRL, 0x00, 0x30).await?;
         Ok(true)
     }
-    fn update_configuration(
+    async fn update_configuration(
         &mut self,
         register: u16,
         upper: u8,
@@ -216,33 +215,33 @@ impl<I2C: I2c> SGTL5000<I2C> {
                 upper,
                 lower,
             ],
-        )?;
-        Ok(true)
+        ).await?;
+      Ok(true)
     }
 
-    fn modify_configuration_bit(
+    async fn modify_configuration_bit(
         &mut self,
         register: u16,
         position: u8,
         value: bool,
     ) -> Result<bool, I2C::Error> {
-        let mut analog_control_configuration = self.read_configuration(register)?;
+        let mut analog_control_configuration = self.read_configuration(register).await.unwrap();
         self.set_configuration_bit(&mut analog_control_configuration, position, value);
         self.update_configuration(
             register,
             analog_control_configuration[0],
             analog_control_configuration[1],
-        )?;
+        ).await?;
         Ok(true)
     }
 
-    fn read_configuration(&mut self, register: u16) -> Result<[u8; 2], I2C::Error> {
+    async fn read_configuration(&mut self, register: u16) -> Result<[u8; 2], I2C::Error> {
         let mut read_buffer: [u8; 2] = [0; 2];
         self.i2c.write_read(
             self.address,
             &[((register >> 8) & 0xFF) as u8, (register & 0xFF) as u8],
             &mut read_buffer,
-        )?;
+        ).await?;
         Ok(read_buffer)
     }
 
@@ -263,45 +262,45 @@ impl<I2C: I2c> SGTL5000<I2C> {
     }
 
     /// volume 0 --> 127
-    pub fn headphone_volume(&mut self, value: u8) -> Result<bool, I2C::Error> {
+    pub async fn headphone_volume(&mut self, value: u8) -> Result<bool, I2C::Error> {
         let hp_volume = match value {
             0x00 => 0x7F,
             0x80..=u8::MAX => 0x00,
             0x01..=0x7F => 0x80 - value,
         };
-        self.update_configuration(CHIP_ANA_HP_CTRL, hp_volume, hp_volume)?;
+        self.update_configuration(CHIP_ANA_HP_CTRL, hp_volume, hp_volume).await?;
         Ok(true)
     }
 
-    pub fn mute_headphone(&mut self) -> Result<bool, I2C::Error> {
-        self.modify_configuration_bit(CHIP_ANA_CTRL, CHIP_ANA_CTRL_MUTE_HP_BIT, true)?;
+    pub async fn mute_headphone(&mut self) -> Result<bool, I2C::Error> {
+        self.modify_configuration_bit(CHIP_ANA_CTRL, CHIP_ANA_CTRL_MUTE_HP_BIT, true).await?;
         Ok(true)
     }
 
-    pub fn unmute_headphone(&mut self) -> Result<bool, I2C::Error> {
-        self.modify_configuration_bit(CHIP_ANA_CTRL, CHIP_ANA_CTRL_MUTE_HP_BIT, false)?;
+    pub async fn unmute_headphone(&mut self) -> Result<bool, I2C::Error> {
+        self.modify_configuration_bit(CHIP_ANA_CTRL, CHIP_ANA_CTRL_MUTE_HP_BIT, false).await?;
         Ok(true)
     }
 
-    pub fn mute_lineout(&mut self) -> Result<bool, I2C::Error> {
-        self.modify_configuration_bit(CHIP_ANA_CTRL, CHIP_ANA_CTRL_MUTE_LO_BIT, true)?;
+    pub async fn mute_lineout(&mut self) -> Result<bool, I2C::Error> {
+        self.modify_configuration_bit(CHIP_ANA_CTRL, CHIP_ANA_CTRL_MUTE_LO_BIT, true).await?;
         Ok(true)
     }
 
-    pub fn unmute_linout(&mut self) -> Result<bool, I2C::Error> {
-        self.modify_configuration_bit(CHIP_ANA_CTRL, CHIP_ANA_CTRL_MUTE_LO_BIT, false)?;
+    pub async fn unmute_linout(&mut self) -> Result<bool, I2C::Error> {
+        self.modify_configuration_bit(CHIP_ANA_CTRL, CHIP_ANA_CTRL_MUTE_LO_BIT, false).await?;
         Ok(true)
     }
 
-    pub fn select_adc_input(&mut self, input: AdcInputSources) -> Result<bool, I2C::Error> {
+    pub async fn select_adc_input(&mut self, input: AdcInputSources) -> Result<bool, I2C::Error> {
         self.modify_configuration_bit(
             CHIP_ANA_CTRL,
             CHIP_ANA_CTRL_SELECT_ADC_BIT,
             (input as u8) == 1,
-        )?;
+        ).await?;
         Ok(true)
     }
-    pub fn select_headphone_input(
+    pub async fn select_headphone_input(
         &mut self,
         input: HeadphoneInputSources,
     ) -> Result<bool, I2C::Error> {
@@ -309,43 +308,43 @@ impl<I2C: I2c> SGTL5000<I2C> {
             CHIP_ANA_CTRL,
             CHIP_ANA_CTRL_SELECT_HP_INPUT_BIT,
             (input as u8) == 1,
-        )?;
+        ).await?;
         Ok(true)
     }
 
     // 0, 10, 20, 30 DB (0, 10, 100, 1000 x amplification)
-    pub fn set_microphone_gain(&mut self, db: u8) -> Result<bool, I2C::Error> {
+    pub  async fn set_microphone_gain(&mut self, db: u8) -> Result<bool, I2C::Error> {
         let mut _set_db_level = 0x0;
         if db <= 30 {
             _set_db_level = db / 10;
         }
 
         //fixed bias resistor = 2KOhm, ,biasvolt = 3v, variable pre-gain.
-        //// mic on board =   self.update_configuration(CHIP_MIC_CTRL,0b00_00_00_11 , 0b00_10_00_10)?;
-        //self.update_configuration(CHIP_MIC_CTRL,0b00_00_00_11 , 0b00_10_00_10)?;
-        self.update_configuration(CHIP_MIC_CTRL, 0b00_00_00_11, 0b01_11_00_10)?;
+        //// mic on board =   self.update_configuration(CHIP_MIC_CTRL,0b00_00_00_11 , 0b00_10_00_10).await;
+        //self.update_configuration(CHIP_MIC_CTRL,0b00_00_00_11 , 0b00_10_00_10).await;
+        self.update_configuration(CHIP_MIC_CTRL, 0b00_00_00_11, 0b00_10_00_10).await?;
         Ok(true)
     }
 
-    pub fn enable_audio_processing(&mut self) -> Result<bool, I2C::Error> {
+    pub async fn enable_audio_processing(&mut self) -> Result<bool, I2C::Error> {
         // DAP --> IS2_DOUT,
 
-        self.update_configuration(CHIP_SSS_CTRL, 0b00_00_00_00, 0b01_11_00_00)?;
-        self.update_configuration(DAP_CONTROL, 0x00, 0b00_0_0_000_1)?;
+        self.update_configuration(CHIP_SSS_CTRL, 0b00_00_00_00, 0b01_11_00_00).await?;
+        self.update_configuration(DAP_CONTROL, 0x00, 0b00_0_0_000_1).await?;
 
-        //        self.update_configuration(DAP_AVC_CTRL, 0b00_01_00_01, 0b00_0_0000_1)?;
+        //        self.update_configuration(DAP_AVC_CTRL, 0b00_01_00_01, 0b00_0_0000_1).await;
         Ok(true)
     }
 
-    pub fn enable_bass_enhance(&mut self) -> Result<bool, I2C::Error> {
-        self.update_configuration(DAP_BASS_ENHANCE, 0b0000000_0, 0b0_111_000_1)?;
-        self.update_configuration(DAP_BASS_ENHANCE_CTRL, 0b0_011_1111, 0b0_0000111)?;
+    pub async fn enable_bass_enhance(&mut self) -> Result<bool, I2C::Error> {
+        self.update_configuration(DAP_BASS_ENHANCE, 0b0000000_0, 0b0_111_000_1).await?;
+        self.update_configuration(DAP_BASS_ENHANCE_CTRL, 0b0_011_1111, 0b0_0000111).await?;
         Ok(true)
     }
 
-    pub fn disable_audio_processing(&mut self) -> Result<bool, I2C::Error> {
-        self.update_configuration(DAP_CONTROL, 0x00, 0x00)?;
-        self.update_configuration(CHIP_SSS_CTRL, 0x00, 0x10)?;
+    pub async  fn disable_audio_processing(&mut self) -> Result<bool, I2C::Error> {
+        self.update_configuration(DAP_CONTROL, 0x00, 0x00).await?;
+        self.update_configuration(CHIP_SSS_CTRL, 0x00, 0x10).await?;
 
         Ok(true)
     }
