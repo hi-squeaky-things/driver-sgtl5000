@@ -1,38 +1,53 @@
 #![no_std]
 #![no_main]
 
+use core::num;
+
 use driver_sgtl5000::SGTL5000;
+use embassy_executor::Spawner;
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, pubsub::PubSubChannel,
+    watch::Watch,
+};
+use embassy_time::{Duration, Timer};
+use esp_alloc::heap_allocator;
 use esp_backtrace as _;
+use esp_hal::i2c::master::{Config, I2c};
+use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{
+    clock::CpuClock,
+    ram,
+    system::{Cpu, CpuControl, Stack},
+};
+use esp_println::println;
+esp_bootloader_esp_idf::esp_app_desc!();
 use esp_hal::i2s::master::Channels;
-use esp_hal::rtc_cntl::Rtc;
 use esp_hal::time::Rate;
 use esp_hal::{
     delay::Delay,
     dma_circular_buffers,
     gpio::NoPin,
-    i2c::master::I2c,
     i2s::master::{DataFormat, I2s},
     xtensa_lx_rt::entry,
 };
-use esp_println::{print, println};
 
-#[entry]
-fn main() -> ! {
+#[esp_rtos::main]
+async fn main(spawner: Spawner) {
     const SAMPLE_RATE: u32 = 44100;
-    const AMOUNT_OF_SAMPLES_BUFFERING_TX: usize = 1100;
-    const BUFFER_SIZE_TX: usize = 4 * AMOUNT_OF_SAMPLES_BUFFERING_TX;
-    const BUFFER_SIZE_RX: usize = 1100;
+    const AMOUNT_OF_SAMPLES_BUFFERING: usize = 1024;
+    const BUFFER_SIZE: usize = 4 * AMOUNT_OF_SAMPLES_BUFFERING;
 
     // init CPU
     let mut config = esp_hal::Config::default().with_cpu_clock(esp_hal::clock::CpuClock::_240MHz);
     let peripherals = esp_hal::init(config);
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+
+    esp_rtos::start(timg0.timer0);
 
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) =
-        dma_circular_buffers!(BUFFER_SIZE_RX, BUFFER_SIZE_TX);
+        dma_circular_buffers!(BUFFER_SIZE, BUFFER_SIZE);
 
-    //
     let dma_channel = peripherals.DMA_CH0;
-
     let mut i2s = I2s::new(
         peripherals.I2S0,
         dma_channel,
@@ -41,7 +56,11 @@ fn main() -> ! {
             .with_data_format(DataFormat::Data16Channel16)
             .with_channels(Channels::STEREO),
     )
-    .unwrap();
+    .unwrap()
+    .into_async();
+
+       //enable_loopback();
+
 
     i2s = i2s.with_mclk(peripherals.GPIO42);
 
@@ -51,145 +70,111 @@ fn main() -> ! {
         .with_ws(peripherals.GPIO41)
         .with_dout(peripherals.GPIO38)
         .build(tx_descriptors);
-    //
+   
 
     let mut i2s_rx = i2s
         .i2s_rx
-        .with_bclk(NoPin)
-        .with_ws(NoPin)
-        .with_din(peripherals.GPIO39)
+    
+        with_din(peripherals.GPIO39)
         .build(rx_descriptors);
 
-    let mut config = esp_hal::i2c::master::Config::default();
+
+
+    let mut config = Config::default();
     let mut i2c = I2c::new(peripherals.I2C0, config)
         .unwrap()
         .with_sda(peripherals.GPIO47)
-        .with_scl(peripherals.GPIO48);
+        .with_scl(peripherals.GPIO48)
+        .into_async();
 
     let mut sgtl500 = SGTL5000::new(i2c);
 
-    println!("Check if he SGTL5000 is ready and respond to commands\n");
-    println!("--> SGTL5000 :: Chip Ready {:?}", sgtl500.ready().unwrap());
+    println!("Check if the SGTL5000 is ready and respond to commands\n");
+    println!(
+        "--> SGTL5000 :: Chip Ready {:?}",
+        sgtl500.ready().await.unwrap()
+    );
 
     println!("Initialize the SGTL5000\n");
     println!(
         "--> SGTL5000 :: Chip Revision {:#x}",
-        sgtl500.get_chip_revision().unwrap()
+        sgtl500.get_chip_revision().await.unwrap()
     );
-    println!("--> SGTL5000 :: Codec setup {:?}", sgtl500.init());
-    sgtl500.power_up();
-    sgtl500.set_microphone_gain(0);
-    sgtl500.select_adc_input(driver_sgtl5000::AdcInputSources::Microphone);
-    sgtl500.headphone_volume(50);
+    println!("-:= > SGTL5000 :: Codec init {:?}", sgtl500.init().await);
+    println!(
+        "-:= > SGTL5000 :: Codec power_up {:?}",
+        sgtl500.power_up().await
+    );
 
-    println!("start!");
-    sgtl500.disable_audio_processing();
+    println!(
+        "--> SGTL5000 ::Volume to 80 {:?}",
+        sgtl500.headphone_volume(30).await
+    );
+    sgtl500.set_microphone_gain(0).await;
 
+    sgtl500
+        .select_adc_input(driver_sgtl5000::AdcInputSources::LineIn)
+        .await;
 
+    println!("recording start");
+    let mut audio_sample = [0u8; SAMPLE_RATE as usize * 4];
 
-    //let mut transfer = i2s_tx.write_dma_circular(tx_buffer).unwrap();
-    println!("receiver buffer {:?}", rx_buffer.len());
-    let mut receiver = i2s_rx.read_dma(rx_buffer).unwrap();
-       let result = receiver.wait();
+    let mut rx_transfer = i2s_rx.read_dma_circular(rx_buffer).unwrap();
 
-     //let mut audio_sample = include_bytes!("sample.raw");
-    let mut buffer_transfer = [0u8; BUFFER_SIZE_TX];
+    let mut sample_index = 0;
+    let mut rcv = [0u8; BUFFER_SIZE];
 
-    let mut audio_sample = [0u8; BUFFER_SIZE_RX];
+    while sample_index < audio_sample.len() {
+        match rx_transfer.available() {
+            Ok(len) => {
+                let len = rx_transfer.pop(&mut rcv).unwrap();
+                if sample_index + len >= audio_sample.len() {
+                         println!("{:?}", rcv);
+                    break;
+                }
+                audio_sample[sample_index..sample_index + len].copy_from_slice(&rcv[..len]);
+                sample_index += len;
+            }
+            Err(e) => println!("error {:?}", e),
+        }
+    }
+
+    println!("recording done");
+
+ let audio_sample = include_bytes!("sample.raw");
 
     let mut counter = 0;
-    let mut counter2 = 0;
-    let mut stop = false;
-    println!("start {:?}", "done");
-
-
-
-   // match result {
-     //   Ok(_) => println!("Dome"),
-       // Err(e) => println!(" Error {:?}", e)
-  //  }
-    println!("receiver buffer {:?}", rx_buffer);
+    let mut transfer = i2s_tx.write_dma_circular_async(tx_buffer).unwrap();
 
     loop {
-        
-     /*    match receiver.available() {
-            Ok(num_bytes) => {
-                if (num_bytes > 0) {
-                    receiver.pop(&mut buffer_receiver);
-
-                    // Calculate how many complete 4-byte chunks we can process
-                    let chunks_to_process = num_bytes / 4;
-                    let remaining_bytes = num_bytes % 4;
-                    if remaining_bytes > 0 {
-                        println!("Warning: Received {} incomplete bytes", remaining_bytes);
-                    }
-
-                    if counter2 >= audio_sample.len() - (chunks_to_process * 4) {
-                        counter2 = 0;
-                        stop = false;
-                    }
-
-                    if !stop {
-                        for i in 0..chunks_to_process {
-                            // Store 4 bytes (2 bytes per channel)
-                            let byte_index = counter2 + (i * 4);
-
-                            // Channel 1 (first 2 bytes)
-                            audio_sample[byte_index] = buffer_receiver[i * 4];
-                            audio_sample[byte_index + 1] = buffer_receiver[i * 4 + 1];
-
-                            // Channel 2 (next 2 bytes)
-                            audio_sample[byte_index + 2] = buffer_receiver[i * 4 + 2];
-                            audio_sample[byte_index + 3] = buffer_receiver[i * 4 + 3];
-                        }
-                        counter2 = counter2 + (chunks_to_process * 4);
-                        // Handle remaining bytes (0-3 bytes)
-                        /*   if remaining_bytes > 0 {
-                            println!("Warning: Received {} incomplete bytes", remaining_bytes);
-
-                            // Option 1: Store remaining bytes and combine with next chunk
-                            if counter2 + remaining_bytes <= audio_sample.len() {
-                                for i in 0..remaining_bytes {
-                                    audio_sample[counter2 + i] = buffer_receiver[chunks_to_process * 4 + i];
-                                }
-                                counter2 += remaining_bytes;
-                            }
-                            // Option 2: Drop the incomplete chunk
-                            // (No action needed - just don't store the remaining bytes)
-                        }*/
+        let result = transfer
+            .push_with(|buffer| {
+                for i in 0..(buffer.len() / 4) {
+                    // left
+                    buffer[i * 4] = audio_sample[counter * 2];
+                    buffer[i * 4 + 1] = audio_sample[counter * 2 + 1];
+                    //right
+                    buffer[i * 4 + 2] = audio_sample[counter * 2];
+                    buffer[i * 4 + 3] = audio_sample[counter * 2 + 1];
+                    counter = counter + 1;
+                    if counter * 2 >= audio_sample.len() {
+                        counter = 0;
                     }
                 }
-            }
-            Err(error) => {
-                println!("RX Error: {:?}", error);
-            }
+                buffer.len()
+            })
+            .await;
+        match result {
+            Ok(e) => {}
+            Err(e) => println!("error = {:?}", e),
         }
-        */
-        /* 
-        match transfer.available() {
-            Ok(num_bytes) => {
-                if (num_bytes > 0) {
-                    let avail = usize::min(BUFFER_SIZE_TX, num_bytes);
-                    for i in 0..(avail / 4) {
-                        // left
-                        buffer_transfer[i * 4] = rx_buffer[counter * 4];
-                        buffer_transfer[i * 4 + 1] = rx_buffer[counter * 4 + 1];
-                        //right
-                        buffer_transfer[i * 4 + 2] = rx_buffer[counter * 4 + 2];
-                        buffer_transfer[i * 4 + 3] = rx_buffer[counter * 4 + 3];
-                        counter = counter + 1;
-                        if counter * 4 >= rx_buffer.len() {
-                            counter = 0;
-                        }
-                    }
-                    // transfer.push(&buffer_transfer[0..avail]);
-                    transfer.push(&buffer_transfer[0..avail]);
-                }
-            }
-            Err(error) => {
-                println!("TX Error: {:?}", error);
-            }
-        }
-        */
     }
 }
+
+fn enable_loopback() {
+        let i2s = esp_hal::peripherals::I2S0::regs();
+                i2s.rx_conf().modify(|_, w| w.rx_slave_mod().set_bit());
+
+             //   i2s.tx_conf().modify(|_, w| w.tx_update().set_bit());
+             //   i2s.rx_conf().modify(|_, w| w.rx_update().set_bit());
+    }

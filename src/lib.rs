@@ -134,7 +134,7 @@ impl<I2C: embedded_hal_async::i2c::I2c> SGTL5000<I2C> {
     }
 
     pub async fn ready(&mut self) -> Result<bool, I2C::Error> {
-        if self.get_chip_id().await.unwrap() == SGTL5000_CHIP_ID {
+        if self.get_chip_id().await? == SGTL5000_CHIP_ID {
             return Ok(true);
         }
         Ok(false)
