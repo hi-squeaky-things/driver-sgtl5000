@@ -348,4 +348,26 @@ impl<I2C: embedded_hal_async::i2c::I2c> SGTL5000<I2C> {
 
         Ok(true)
     }
+
+ pub async fn enable_mixer(&mut self) -> Result<bool, I2C::Error> {
+         self.update_configuration(DAP_CONTROL, 0x00, 0b0001_0001).await?;
+        Ok(true)
+    }
+
+    pub async fn enable_surround(&mut self) -> Result<bool, I2C::Error> {
+        self.update_configuration(DAP_SGTL_SURROUND, 0b0000_0000, 0b0111_0011).await?;
+        Ok(true)
+    }
+
+    //sets the mix channel volume level
+    pub async fn set_mix_channel_volume_level(&mut self) -> Result<bool, I2C::Error> {
+         self.update_configuration(DAP_MIX_CHAN, 0x80, 0x00).await?;
+        Ok(true)
+    }
+
+     //sets the mix channel volume level
+    pub async fn set_main_channel_volume_level(&mut self) -> Result<bool, I2C::Error> {
+         self.update_configuration(DAP_MAIN_CHAN, 0x80, 0x00).await?;
+        Ok(true)
+    }
 }

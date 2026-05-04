@@ -42,7 +42,9 @@ async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(config);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
-    esp_rtos::start(timg0.timer0);
+     let sw_int = esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+
+    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
 
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) =
         dma_circular_buffers!(BUFFER_SIZE, BUFFER_SIZE);
@@ -52,18 +54,16 @@ async fn main(spawner: Spawner) {
         peripherals.I2S0,
         dma_channel,
         esp_hal::i2s::master::Config::new_tdm_philips()
+            .with_signal_loopback(true)
             .with_sample_rate(Rate::from_hz(44100))
             .with_data_format(DataFormat::Data16Channel16)
             .with_channels(Channels::STEREO),
     )
     .unwrap()
-    .into_async();
+    .into_async()
+    .with_mclk(peripherals.GPIO42);
 
-       //enable_loopback();
-
-
-    i2s = i2s.with_mclk(peripherals.GPIO42);
-
+     
     let mut i2s_tx = i2s
         .i2s_tx
         .with_bclk(peripherals.GPIO40)
@@ -74,8 +74,7 @@ async fn main(spawner: Spawner) {
 
     let mut i2s_rx = i2s
         .i2s_rx
-    
-        with_din(peripherals.GPIO39)
+        .with_din(peripherals.GPIO39)
         .build(rx_descriptors);
 
 
@@ -108,73 +107,79 @@ async fn main(spawner: Spawner) {
 
     println!(
         "--> SGTL5000 ::Volume to 80 {:?}",
-        sgtl500.headphone_volume(30).await
+        sgtl500.headphone_volume(60).await
     );
-    sgtl500.set_microphone_gain(0).await;
+    sgtl500.set_microphone_gain(30).await;
 
     sgtl500
-        .select_adc_input(driver_sgtl5000::AdcInputSources::LineIn)
+        .select_adc_input(driver_sgtl5000::AdcInputSources::Microphone)
         .await;
 
     println!("recording start");
+ 
+    println!("start!");
+    sgtl500.enable_audio_processing().await;
+    sgtl500.enable_bass_enhance().await;
+    sgtl500.enable_surround().await;
+
+
+
+    let mut transfer = i2s_tx.write_dma_circular(tx_buffer).unwrap();
+    let mut receiver = i2s_rx.read_dma_circular(rx_buffer).unwrap();
     let mut audio_sample = [0u8; SAMPLE_RATE as usize * 4];
-
-    let mut rx_transfer = i2s_rx.read_dma_circular(rx_buffer).unwrap();
-
-    let mut sample_index = 0;
-    let mut rcv = [0u8; BUFFER_SIZE];
-
-    while sample_index < audio_sample.len() {
-        match rx_transfer.available() {
-            Ok(len) => {
-                let len = rx_transfer.pop(&mut rcv).unwrap();
-                if sample_index + len >= audio_sample.len() {
-                         println!("{:?}", rcv);
-                    break;
-                }
-                audio_sample[sample_index..sample_index + len].copy_from_slice(&rcv[..len]);
-                sample_index += len;
-            }
-            Err(e) => println!("error {:?}", e),
-        }
-    }
-
-    println!("recording done");
-
- let audio_sample = include_bytes!("sample.raw");
+    //  let mut audio_sample = include_bytes!("sample.raw");
+    let mut buffer_receiver = [0u8; BUFFER_SIZE];
+    let mut buffer_transfer = [0u8; BUFFER_SIZE];
 
     let mut counter = 0;
-    let mut transfer = i2s_tx.write_dma_circular_async(tx_buffer).unwrap();
-
+    let mut counter2 = 0;
+    let mut stop = false;
     loop {
-        let result = transfer
-            .push_with(|buffer| {
-                for i in 0..(buffer.len() / 4) {
-                    // left
-                    buffer[i * 4] = audio_sample[counter * 2];
-                    buffer[i * 4 + 1] = audio_sample[counter * 2 + 1];
-                    //right
-                    buffer[i * 4 + 2] = audio_sample[counter * 2];
-                    buffer[i * 4 + 3] = audio_sample[counter * 2 + 1];
-                    counter = counter + 1;
-                    if counter * 2 >= audio_sample.len() {
-                        counter = 0;
+        match transfer.available() {
+            Ok(num_bytes) => {
+                if (num_bytes > 0) {
+                    let avail = usize::min(BUFFER_SIZE, num_bytes);
+                    for i in 0..(avail / 4) {
+                        // left
+                        buffer_transfer[i * 4] = audio_sample[counter * 4];
+                        buffer_transfer[i * 4 + 1] = audio_sample[counter * 4 + 1];
+                        //right
+                        buffer_transfer[i * 4 + 2] = audio_sample[counter * 4 + 2];
+                        buffer_transfer[i * 4 + 3] = audio_sample[counter * 4 + 3];
+                        counter = counter + 1;
+                        if counter * 4 >= audio_sample.len() {
+                            counter = 0;
+                        }
+                    }
+                    // transfer.push(&buffer_transfer[0..avail]);
+                    transfer.push(&buffer_transfer[0..avail]);
+                }
+            }
+            Err(error) => {
+                println!("TX Error: {:?}", error);
+            }
+        }
+
+        match receiver.available() {
+            Ok(num_bytes) => {
+                if (num_bytes > 0) {
+                    receiver.pop(&mut buffer_receiver);
+
+                    if counter2 >= audio_sample.len() - num_bytes {
+                        counter2 = 0;
+                        stop = false;
+                    }
+                    if !stop {
+                        for i in 0..(num_bytes) {
+                            audio_sample[counter2 + i] = buffer_receiver[i];
+                        }
+                        counter2 = counter2 + num_bytes;
                     }
                 }
-                buffer.len()
-            })
-            .await;
-        match result {
-            Ok(e) => {}
-            Err(e) => println!("error = {:?}", e),
+            }
+            Err(error) => {
+                println!("RX Error: {:?}", error);
+            }
         }
     }
 }
-
-fn enable_loopback() {
-        let i2s = esp_hal::peripherals::I2S0::regs();
-                i2s.rx_conf().modify(|_, w| w.rx_slave_mod().set_bit());
-
-             //   i2s.tx_conf().modify(|_, w| w.tx_update().set_bit());
-             //   i2s.rx_conf().modify(|_, w| w.rx_update().set_bit());
-    }
