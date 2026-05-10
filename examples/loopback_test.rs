@@ -107,9 +107,9 @@ async fn main(spawner: Spawner) {
 
     println!(
         "--> SGTL5000 ::Volume to 80 {:?}",
-        sgtl500.headphone_volume(60).await
+        sgtl500.headphone_volume(80).await
     );
-    sgtl500.set_microphone_gain(30).await;
+    sgtl500.set_microphone_gain(0).await;
 
     sgtl500
         .select_adc_input(driver_sgtl5000::AdcInputSources::Microphone)
@@ -119,8 +119,8 @@ async fn main(spawner: Spawner) {
  
     println!("start!");
     sgtl500.enable_audio_processing().await;
-    sgtl500.enable_bass_enhance().await;
-    sgtl500.enable_surround().await;
+  //sgtl500.enable_bass_enhance().await;
+  //  sgtl500.enable_surround().await;
 
 
 
