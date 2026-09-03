@@ -42,7 +42,8 @@ async fn main(spawner: Spawner) {
     let peripherals = esp_hal::init(config);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
-     let sw_int = esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    let sw_int =
+        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
 
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
 
@@ -63,21 +64,17 @@ async fn main(spawner: Spawner) {
     .into_async()
     .with_mclk(peripherals.GPIO42);
 
-     
     let mut i2s_tx = i2s
         .i2s_tx
         .with_bclk(peripherals.GPIO40)
         .with_ws(peripherals.GPIO41)
         .with_dout(peripherals.GPIO38)
         .build(tx_descriptors);
-   
 
     let mut i2s_rx = i2s
         .i2s_rx
         .with_din(peripherals.GPIO39)
         .build(rx_descriptors);
-
-
 
     let mut config = Config::default();
     let mut i2c = I2c::new(peripherals.I2C0, config)
@@ -116,13 +113,11 @@ async fn main(spawner: Spawner) {
         .await;
 
     println!("recording start");
- 
+
     println!("start!");
     sgtl500.enable_audio_processing().await;
-  //sgtl500.enable_bass_enhance().await;
-  //  sgtl500.enable_surround().await;
-
-
+    //sgtl500.enable_bass_enhance().await;
+    //  sgtl500.enable_surround().await;
 
     let mut transfer = i2s_tx.write_dma_circular(tx_buffer).unwrap();
     let mut receiver = i2s_rx.read_dma_circular(rx_buffer).unwrap();
