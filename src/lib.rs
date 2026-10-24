@@ -312,6 +312,21 @@ impl<I2C: embedded_hal_async::i2c::I2c> SGTL5000<I2C> {
         Ok(true)
     }
 
+    pub async fn linein_level(&mut self, level: u8) -> Result<bool, I2C::Error> {
+        let level = if level > 15 { 15 } else { level };
+         self.update_configuration(CHIP_ANA_ADC_CTRL, 0x0, (level << 4) | level)
+            .await?;
+        Ok(true)
+    }
+
+    pub async fn lineout_level(&mut self, level: u8) -> Result<bool, I2C::Error> {
+        let level = if level > 31 { 31 } else if level < 13 { 13 } else { level };
+        self.update_configuration(CHIP_LINE_OUT_VOL, (level<<8)|level,(level<<8)|level )
+            .await?;
+        Ok(true)
+    }
+
+
     pub async fn select_adc_input(&mut self, input: AdcInputSources) -> Result<bool, I2C::Error> {
         self.modify_configuration_bit(
             CHIP_ANA_CTRL,

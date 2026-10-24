@@ -109,7 +109,7 @@ async fn main(spawner: Spawner) {
     sgtl500.set_microphone_gain(0).await;
 
     sgtl500
-        .select_adc_input(driver_sgtl5000::AdcInputSources::Microphone)
+        .select_adc_input(driver_sgtl5000::AdcInputSources::LineIn)
         .await;
 
     println!("recording start");
